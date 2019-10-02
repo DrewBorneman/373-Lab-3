@@ -111,8 +111,8 @@ find_package(catkin REQUIRED COMPONENTS
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
 #  INCLUDE_DIRS include
-#  LIBRARIES ariac_challenge
-#  CATKIN_DEPENDS geometry_msgs moveit_control_interface moveit_core moveit_kinematics moveit_move_group moveit_planning_interface moveit_ros_planning osrf_gear roscpp std_msgs tf_conversions
+  LIBRARIES ariac_challenge
+  CATKIN_DEPENDS geometry_msgs moveit_core moveit_kinematics moveit_ros_move_group moveit_ros_planning_interface moveit_ros_planning osrf_gear roscpp std_msgs tf_conversions
 #  DEPENDS system_lib
 )
 
