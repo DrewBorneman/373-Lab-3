@@ -6,7 +6,6 @@
 #include "osrf_gear/LogicalCameraImage.h"
 #include "std_msgs/String.h"
 #include <vector>
-
 // MoveIt header files
 #include "moveit/move_group_interface/move_group_interface.h"
 #include "moveit/planning_scene_interface/planning_scene_interface.h"
@@ -24,7 +23,7 @@ moveit::planning_interface::MoveGroupInterface move_group("manipulator");
 void recieveOrder(const osrf_gear::Order::ConstPtr & order)
 {
 
-  ROS_INFO("Order recieved:\n" << *order);
+  ROS_INFO("Order recieved:%s\n", *order);
   order_vector.push_back(*order);
 }
 
@@ -33,6 +32,23 @@ void logicalCameraCallback(const osrf_gear::LogicalCameraImage::ConstPtr & image
   for(int i=0;i<imageMsg->models.size();i++){
     ROS_INFO("Model: %s\n",imageMsg->models[i]);
   }
+}
+
+void startCompetition(ros::NodeHandle & n)
+{
+
+  // To declare the variable in this way where necessary in the code. 
+  std_srvs::Trigger begin_comp;
+  // Create the service client.
+  ros::ServiceClient begin_client = n.serviceClient<std_srvs::Trigger>("/ariac/start_competition");
+  // Call the Service
+  begin_client.call(begin_comp);
+ if (!begin_comp.response.success) {  // If not successful, print out why.
+    ROS_ERROR("Competition service returned failure: %s",begin_comp.response.message.c_str());
+  } else {
+    ROS_INFO("Competition started!");
+  } 
+
 }
 
 tf2_ros::TransformListener tfListener(tfBuffer);
@@ -47,15 +63,7 @@ int main(int argc, char **argv)
 	
   order_vector.clear();
 
-  // To declare the variable in this way where necessary in the code. 
-  std_srvs::Trigger begin_comp;
-  // Create the service client.
-  ros::ServiceClient begin_client = n.serviceClient<std_srvs::Trigger>("/ariac/start_competition");
-  // Call the Service
-  begin_client.call(begin_comp);
-  // Sample output
-  ROS_WARN("Competition service returned failure: %s",begin_comp.response.message.c_str());
-
+  startCompetition(n);
 //Retrieve the transformation
 geometry_msgs::TransformStamped tfStamped;
 try {
@@ -65,20 +73,19 @@ try {
 catch (tf2::TransformException &ex) {
   ROS_ERROR("%s", ex.what());
   }
-// tf2_ross::Buffer.lookupTransform("to_frame", "from_frame", "how_recent", "how_long_to_wait);
+ //tf2_ros::Buffer.lookupTransform("to_frame", "from_frame", "how_recent", "how_long_to_wait");
 
+//create variables
 geometry_msgs::PoseStamped current_pose, end_pose;
 //current_pose.pose = //...;  unsure what to do here 
 
-end_pose.pose.orientation.z += 0.10;
+end_pose.pose.position.z += 0.10;
 end_pose.pose.orientation.w = 0.707;
 end_pose.pose.orientation.x = 0.0;
 end_pose.pose.orientation.y = 0.707;
 end_pose.pose.orientation.z = 0.0;
 
 tf2::doTransform(current_pose, end_pose, tfStamped);
-
-
 
   ros::spin();
 
