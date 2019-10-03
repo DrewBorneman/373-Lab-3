@@ -7,6 +7,7 @@
 #include "osrf_gear/LogicalCameraImage.h"
 #include "osrf_gear/Model.h"
 #include "std_msgs/String.h"
+
 #include <vector>
 // MoveIt header files
 #include "moveit/move_group_interface/move_group_interface.h"
@@ -19,8 +20,7 @@
 
 std::vector<osrf_gear::Order> order_vector;
 std::string ObjectType = "piston_rod_part";
-tf2_ros::Buffer tfBuffer;
-moveit::planning_interface::MoveGroupInterface move_group("manipulator");
+std::string CompetitionState;
 
 	//create variables
 	geometry_msgs::PoseStamped current_pose, end_pose;
@@ -36,18 +36,34 @@ void logicalCameraCallback(const osrf_gear::LogicalCameraImage::ConstPtr & image
 { 
   for(int i=0;i<imageMsg->models.size();i++){
     ROS_INFO("Model: %s\n",imageMsg->models[i]);
-		if(imageMsg->models[i].type == ObjectType)
+		if(imageMsg->models[i].type == ObjectType)//just work on the first item
 			current_pose.pose = imageMsg->models[i].pose;
   }
 }
 
+  /// Called when a new message is received.
+  void competitionCallback(const std_msgs::String::ConstPtr & msg) {
+    if (msg->data == "done" && CompetitionState != "done")
+    {
+      ROS_INFO("Competition ended.");
+    }
+    CompetitionState = msg->data;
+  }
+
 void startCompetition(ros::NodeHandle & n)
 {
 
-  // To declare the variable in this way where necessary in the code. 
-  std_srvs::Trigger begin_comp;
   // Create the service client.
   ros::ServiceClient begin_client = n.serviceClient<std_srvs::Trigger>("/ariac/start_competition");
+  // Wait for the client to be ready
+  if (!begin_client.exists()) {
+    ROS_INFO("Waiting for the competition to be ready...");
+    begin_client.waitForExistence();
+    ROS_INFO("Competition is now ready.");
+  }
+ 	ROS_INFO("Requesting competition start...");
+  // To declare the variable in this way where necessary in the code. 
+  std_srvs::Trigger begin_comp;
   // Call the Service
   begin_client.call(begin_comp);
  if (!begin_comp.response.success) {  // If not successful, print out why.
@@ -58,22 +74,29 @@ void startCompetition(ros::NodeHandle & n)
 
 }
 
-tf2_ros::TransformListener tfListener(tfBuffer);
 
 int main(int argc, char **argv)
 {
+	ros::init(argc, argv, "ariac_challenge_node");
+  ros::NodeHandle n;
+
 	ros::AsyncSpinner spinner(2);
 	spinner.start();
-  ros::init(argc, argv, "ariac_challenge");
-  ros::NodeHandle n;
 
   ros::Subscriber orderSub = n.subscribe("ariac/orders", 1000, recieveOrder);
   ros::Subscriber cameraSub = n.subscribe("ariac/logial_camera", 1000, logicalCameraCallback);
+  // Subscribe to the '/ariac/competition_state' topic.
+  ros::Subscriber competitionStateSubscriber = n.subscribe("/ariac/competition_state", 10, &competitionCallback);
+	tf2_ros::Buffer tfBuffer;
+	moveit::planning_interface::MoveGroupInterface move_group("manipulator");
+	tf2_ros::TransformListener tfListener(tfBuffer);
 	geometry_msgs::TransformStamped tfStamped;
 	moveit::planning_interface::MoveItErrorCode planningError;
+
   order_vector.clear();
 
-  startCompetition(n);
+	startCompetition(n);
+	
 	while(ros::ok()){
 		ros::spinOnce();
 		if(order_vector.size() > 0){
