@@ -37,7 +37,7 @@ void logicalCameraCallback(const osrf_gear::LogicalCameraImage::ConstPtr & image
   for(int i=0;i<imageMsg->models.size();i++){
     ROS_INFO("Model: %s\n",imageMsg->models[i]);
 		if(imageMsg->models[i].type == ObjectType)//just work on the first item
-			current_pose.pose = imageMsg->models[i].pose;
+			current_pose.pose = imageMsg->models[i].pose; // i think we need to add /ariac/{name} because that's the logical camera's output. I'm just not positive where to put it
   }
 }
 
@@ -103,7 +103,9 @@ int main(int argc, char **argv)
 			//Retrieve the transformation
 
 			try {
-				tfStamped = tfBuffer.lookupTransform(move_group.getPlanningFrame().c_str(), "logical_camera_frame", ros::Time(0.0), ros::Duration(1.0));
+        //Dr Lee email: the first input into lookupTransform should be changed to "world" as it will not work otherwise
+						// I don't know if it should be world, 'world , or "world"
+				tfStamped = tfBuffer.lookupTransform("world",move_group.getPlanningFrame().c_str(), "logical_camera_frame", ros::Time(0.0), ros::Duration(1.0));
 				ROS_DEBUG("Transform to [%s] from [%s]", tfStamped.header.frame_id.c_str(), 		tfStamped.child_frame_id.c_str());
 				}
 			catch (tf2::TransformException &ex) {
