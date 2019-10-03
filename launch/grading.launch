@@ -1,0 +1,3 @@
+<launch>
+	<node name="ariac_challenge_node" pkg="ariac_challenge" type="ariac_challenge_node" output="screen" />
+</launch>
