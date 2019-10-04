@@ -34,11 +34,9 @@ void recieveOrder(const osrf_gear::Order::ConstPtr & order)
 
 void logicalCameraCallback(const osrf_gear::LogicalCameraImage::ConstPtr & imageMsg)
 { 
-  for(int i=0;i<imageMsg->models.size();i++){
-    ROS_INFO("Model: %s\n",imageMsg->models[i]);
-		if(imageMsg->models[i].type == ObjectType)//just work on the first item
-			current_pose.pose = imageMsg->models[i].pose; // i think we need to add /ariac/{name} because that's the logical camera's output. I'm just not positive where to put it
-  }
+    ROS_INFO("Model: %s\n",imageMsg->models[1]);
+		if(imageMsg->models[1].type == ObjectType)//just work on the first item
+			current_pose.pose.position = imageMsg->models[1].pose.position; // i think we need to add /ariac/{name} because that's the logical camera's output. I'm just not positive where to put it
 }
 
   /// Called when a new message is received.
@@ -62,11 +60,11 @@ void startCompetition(ros::NodeHandle & n)
     ROS_INFO("Competition is now ready.");
   }
  	ROS_INFO("Requesting competition start...");
-  // To declare the variable in this way where necessary in the code. 
+  // To declare the variable in this way where necessary in the code.
   std_srvs::Trigger begin_comp;
   // Call the Service
   begin_client.call(begin_comp);
- if (!begin_comp.response.success) {  // If not successful, print out why.
+	if (!begin_comp.response.success) {  // If not successful, print out why.
     ROS_ERROR("Competition service returned failure: %s",begin_comp.response.message.c_str());
   } else {
     ROS_INFO("Competition started!");
@@ -78,22 +76,22 @@ void startCompetition(ros::NodeHandle & n)
 int main(int argc, char **argv)
 {
 	ros::init(argc, argv, "ariac_challenge_node");
-  ros::NodeHandle n;
+	ros::NodeHandle n;
 
 	ros::AsyncSpinner spinner(2);
 	spinner.start();
 
-  ros::Subscriber orderSub = n.subscribe("ariac/orders", 1000, recieveOrder);
-  ros::Subscriber cameraSub = n.subscribe("ariac/logial_camera", 1000, logicalCameraCallback);
-  // Subscribe to the '/ariac/competition_state' topic.
-  ros::Subscriber competitionStateSubscriber = n.subscribe("/ariac/competition_state", 10, &competitionCallback);
+	order_vector.clear();
+
+	ros::Subscriber orderSub = n.subscribe("ariac/orders", 1000, recieveOrder);
+	ros::Subscriber cameraSub = n.subscribe("ariac/logial_camera_over_agv1", 1000, logicalCameraCallback);
+	// Subscribe to the '/ariac/competition_state' topic.
+	ros::Subscriber competitionStateSubscriber = n.subscribe("/ariac/competition_state", 10, &competitionCallback);
 	tf2_ros::Buffer tfBuffer;
 	moveit::planning_interface::MoveGroupInterface move_group("manipulator");
 	tf2_ros::TransformListener tfListener(tfBuffer);
 	geometry_msgs::TransformStamped tfStamped;
 	moveit::planning_interface::MoveItErrorCode planningError;
-
-  order_vector.clear();
 
 	startCompetition(n);
 	
@@ -103,14 +101,15 @@ int main(int argc, char **argv)
 			//Retrieve the transformation
 
 			try {
-        //Dr Lee email: the first input into lookupTransform should be changed to "world" as it will not work otherwise
-						// I don't know if it should be world, 'world , or "world"
-				tfStamped = tfBuffer.lookupTransform("world",move_group.getPlanningFrame().c_str(), "logical_camera_frame", ros::Time(0.0), ros::Duration(1.0));
+				tfStamped = tfBuffer.lookupTransform("world", "logical_camera_frame", ros::Time(0.0), ros::Duration(1.0));
 				ROS_DEBUG("Transform to [%s] from [%s]", tfStamped.header.frame_id.c_str(), 		tfStamped.child_frame_id.c_str());
 				}
 			catch (tf2::TransformException &ex) {
 				ROS_ERROR("%s", ex.what());
 			}
+			//end_pose = current_pose;
+
+		tf2::doTransform(current_pose, end_pose, tfStamped);
 
 			end_pose.pose.position.z += 0.10;
 			end_pose.pose.orientation.w = 0.707;
@@ -118,18 +117,17 @@ int main(int argc, char **argv)
 			end_pose.pose.orientation.y = 0.707;
 			end_pose.pose.orientation.z = 0.0;
 
-			tf2::doTransform(current_pose, end_pose, tfStamped);
-
 			// Set the desired pose for the arm in the arm controller.
 			move_group.setPoseTarget(end_pose);
 			// Instantiate and create a plan.
 			moveit::planning_interface::MoveGroupInterface::Plan movePlan;
-			// Create a plan based on the settings (all default settings now) in the_plan.
+			// Create a plan based on the settings (all default settings now) in movePlan.
 			planningError = move_group.plan(movePlan);
 			// Planning does not always succeed. Check the output.
 			// In the event that the plan was created, execute it.
 			if(planningError == moveit_msgs::MoveItErrorCodes::SUCCESS)
 				move_group.execute(movePlan);
+			
 		}
 	}
   return 0;
