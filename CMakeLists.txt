@@ -9,15 +9,11 @@ project(ariac_challenge)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
   geometry_msgs
-  moveit_core
-  moveit_kinematics
-  moveit_ros_move_group
-  moveit_ros_planning_interface
-  moveit_ros_planning
   osrf_gear
   roscpp
   std_msgs
   tf_conversions
+  ur_kinematics
 )
 
 ## System dependencies are found with CMake's conventions
@@ -112,7 +108,7 @@ find_package(catkin REQUIRED COMPONENTS
 catkin_package(
 #  INCLUDE_DIRS include
   LIBRARIES ariac_challenge
-  CATKIN_DEPENDS geometry_msgs moveit_core moveit_kinematics moveit_ros_move_group moveit_ros_planning_interface moveit_ros_planning osrf_gear roscpp std_msgs tf_conversions
+  CATKIN_DEPENDS geometry_msgs osrf_gear roscpp std_msgs tf_conversions
 #  DEPENDS system_lib
 )
 
@@ -155,6 +151,7 @@ include_directories(
 ## Specify libraries to link a library or executable target against
  target_link_libraries(ariac_challenge_node
    ${catkin_LIBRARIES}
+   ur10_kin
  )
 
 #############
