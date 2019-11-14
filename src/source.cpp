@@ -26,6 +26,8 @@ std::vector<osrf_gear::Order> order_vector;
 std::string ObjectType = "piston_rod_part";
 std::string CompetitionState;
 sensor_msgs::JointState joint_states;
+int numberofparts = 12;
+int partNumber = 0;
 
 	//create variables
 	geometry_msgs::PoseStamped current_pose, end_pose;
@@ -33,7 +35,7 @@ sensor_msgs::JointState joint_states;
 void recieveOrder(const osrf_gear::Order::ConstPtr & order)
 {
 
-  ROS_INFO("Order recieved:%s\n", *order);
+  ROS_INFO("Order recieved!\n");
   order_vector.push_back(*order);
 }
 
@@ -45,7 +47,7 @@ void logicalCameraCallback(const osrf_gear::LogicalCameraImage::ConstPtr & image
 { 
     //ROS_INFO("Model: %s\n",imageMsg->models[1]);
 		//if(imageMsg->models[1].type == ObjectType)	we're assuming everything here is piston_rod_part
-		current_pose.pose = imageMsg->models[0].pose; // i think we need to add /ariac/{name} because that's the logical camera's output. I'm just not positive where to put it
+		current_pose.pose = imageMsg->models[partNumber].pose; // i think we need to add /ariac/{name} because that's the logical camera's output. I'm just not positive where to put it
 		//ROS_INFO("Part Pose: X:%f, Y:%f, Z:%f\n", current_pose.pose.position.x,current_pose.pose.position.y,current_pose.pose.position.z);
 }
 
@@ -123,7 +125,7 @@ int main(int argc, char **argv)
 
 			try {
 				tfBuffer.canTransform("world","logical_camera_frame", ros::Time(), ros::Duration(5.0), &errStr);
-				tfStamped = tfBuffer.lookupTransform("world", "logical_camera_frame", ros::Time(0.0), ros::Duration(1.0));
+				tfStamped = tfBuffer.lookupTransform("base_link", "logical_camera_frame", ros::Time(0.0), ros::Duration(1.0));
 				ROS_DEBUG("Transform to [%s] from [%s]", tfStamped.header.frame_id.c_str(), 		tfStamped.child_frame_id.c_str());
 				}
 			catch (tf2::TransformException &ex) {
@@ -145,21 +147,25 @@ int main(int argc, char **argv)
 			//ur_kinematics::forward(&jointAngles_[0], &endPoseMatrix[0][0]);
 			num_sol = ur_kinematics::inverse(&endPoseMatrix[0][0], &q_sols[0][0], 0.0);
 			//ROS_INFO("no of solutions: %i\n",num_sol);
-			//ROS_INFO("all solutions: ");
-			best_num = -1;
+			ROS_INFO("all solutions: ");
+			best_num = 0;
+/*
 			for(int i=0;i<num_sol;i++){
-				//for(int j=0;j<6;j++)
-					//ROS_INFO("%d, ", q_sols[i][j]);			
-				//ROS_INFO("\n");
 				if(q_sols[i][0]>(-PI/2)&&q_sols[i][0]<(PI/2)){	//base joint must be facing forward
 					if(q_sols[i][1]>0&&q_sols[i][1]<(PI)){	//shoulder joint cannot be below the table/linear actuator
 						if(q_sols[i][3]>(-PI/2)&&q_sols[i][3]<(PI/2)){	//first wrist joint cannot bend backwards		
 							best_num = i;
+							for(int j=0;j<6;j++)
+								ROS_INFO("%d, ", q_sols[i][j]);			
+							ROS_INFO("\n");
 							break;
 						}
 					}
 				}			
 			}
+*/
+			ROS_INFO("Selecting part no.:%i\n",partNumber);
+
 			if (best_num > -1){
 				ROS_INFO("Best solution:%i\n", best_num);
 				for (int i = 0; i < 6; i++)
@@ -182,10 +188,10 @@ int main(int argc, char **argv)
 				joint_trajectory.points[0].positions.resize(joint_trajectory.joint_names.size());
 				for (int indy = 0; indy < joint_trajectory.joint_names.size(); indy++) {
 					for (int indz = 0; indz < joint_states.name.size(); indz++) {
-						//if (joint_trajectory.joint_names[indy] == joint_states.name[indz]) {
+						if (joint_trajectory.joint_names[indy] == joint_states.name[indz]) {
 							joint_trajectory.points[0].positions[indy] = joint_states.position[indz];
 							break;
-						//}
+						}
 					}
 				}
 				
@@ -196,13 +202,19 @@ int main(int argc, char **argv)
 				for (int indy = 0; indy < 6; indy++) {
 					joint_trajectory.points[1].positions[indy + 1] = q_sols[best_num][indy];
 				}
-				joint_trajectory.points[1].time_from_start = ros::Duration(1.0);		
+				joint_trajectory.points[1].time_from_start = ros::Duration(2.0);		
 				
 				joint_trajectory_publisher.publish(joint_trajectory);
 				
+				ros::Duration(3.0).sleep();
+				if(partNumber<numberofparts)
+					partNumber++;
+				else
+					partNumber=0;
+				
 			}
 			else{
-				//ROS_INFO("No solution exists\n");
+				ROS_INFO("No solution exists\n");
 			}
 			
 			// Set the desired pose for the arm in the arm controller.
