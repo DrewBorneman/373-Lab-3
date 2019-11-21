@@ -19,6 +19,13 @@
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 #include "geometry_msgs/TransformStamped.h"
 
+#define SHOULDERPANJOINT 0
+#define SHOULDERLIFTJOINT 1
+#define ELBOWJOINT 2
+#define WRIST1JOINT 3
+#define WRIST2JOINT 4
+#define WRIST3JOINT 5
+
 #define PI 3.14159265
 
 
@@ -26,6 +33,7 @@ std::vector<osrf_gear::Order> order_vector;
 std::string ObjectType = "piston_rod_part";
 std::string CompetitionState;
 sensor_msgs::JointState joint_states;
+osrf_gear::Model camera_models[32];
 int numberofparts = 12;
 int partNumber = 0;
 
@@ -47,7 +55,9 @@ void logicalCameraCallback(const osrf_gear::LogicalCameraImage::ConstPtr & image
 { 
     //ROS_INFO("Model: %s\n",imageMsg->models[1]);
 		//if(imageMsg->models[1].type == ObjectType)	we're assuming everything here is piston_rod_part
-		current_pose.pose = imageMsg->models[partNumber].pose; // i think we need to add /ariac/{name} because that's the logical camera's output. I'm just not positive where to put it
+		for(int i = 0; i<imageMsg->models.size();i++)
+			camera_models[i] = imageMsg->models[i];
+		//camera_models = imageMsg->models;
 		//ROS_INFO("Part Pose: X:%f, Y:%f, Z:%f\n", current_pose.pose.position.x,current_pose.pose.position.y,current_pose.pose.position.z);
 }
 
@@ -84,24 +94,8 @@ void startCompetition(ros::NodeHandle & n)
 
 }
 
-
-int main(int argc, char **argv)
+void move_arm(ros::Publisher joint_trajectory_publisher,double x_pos,double y_pos,double z_pos)
 {
-	ros::init(argc, argv, "ariac_challenge_node");
-	ros::NodeHandle n;
-
-	ros::AsyncSpinner spinner(2);
-	spinner.start();
-
-	order_vector.clear();
-
-	ros::Subscriber orderSub = n.subscribe("ariac/orders", 1000, recieveOrder);
-
-	ros::Subscriber cameraSub = n.subscribe("ariac/logical_camera", 1000, logicalCameraCallback);
-	// Subscribe to the '/ariac/competition_state' topic.
-	ros::Subscriber competitionStateSubscriber = n.subscribe("/ariac/competition_state", 10, &competitionCallback);
-	ros::Publisher joint_trajectory_publisher = n.advertise<trajectory_msgs::JointTrajectory>("/ariac/arm/command", 10);
-	ros::Subscriber joint_states_h = n.subscribe("ariac/joint_states", 10, jointCB);
 	tf2_ros::Buffer tfBuffer;
 	//moveit::planning_interface::MoveGroupInterface move_group("manipulator");
 	tf2_ros::TransformListener tfListener(tfBuffer);
@@ -110,18 +104,13 @@ int main(int argc, char **argv)
 	double q[] = {3.14, -1.13, 1.51, 3.77, -1.51, 0};	//initial values for the joint angles
 	double T[4][4];		//current pose
 	double q_sols[8][6];
+	double constraints[6][2] = {{(PI/2),(3*(PI/2))},{PI,(2*PI)},{0,(2*PI)},{0,(2*PI)},{((PI/2)-0.1),((PI/2)+0.1)},{0,(2*PI)}};
 	std::string errStr;
 	int num_sol;
 	int best_num;
 	int count = 0;
-	double best_sol[6];
+	int trajectory_scores[8] = {0,0,0,0,0,0,0,0};
 	trajectory_msgs::JointTrajectory joint_trajectory;
-	startCompetition(n);
-	
-	while(ros::ok()){
-		ros::spinOnce();
-		if(order_vector.size() > 0){
-			//Retrieve the transformation
 
 			try {
 				tfBuffer.canTransform("world","logical_camera_frame", ros::Time(), ros::Duration(5.0), &errStr);
@@ -142,36 +131,50 @@ int main(int argc, char **argv)
 
 			//ROS_INFO("Part Pose: X:%f, Y:%f, Z:%f\n", end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z);
 
-			double endPoseMatrix[4][4] = {{0.0, -1.0, 0.0, static_cast<double>(end_pose.pose.position.x)}, {0.0, 0.0, 1.0, static_cast<double>(end_pose.pose.position.y)}, {-1.0, 0.0, 0.0 , static_cast<double>(end_pose.pose.position.z+0.3)}, {0.0, 0.0, 0.0, 1.0}};
+			double endPoseMatrix[4][4] = {{0.0, -1.0, 0.0, static_cast<double>(x_pos)}, {0.0, 0.0, 1.0, static_cast<double>(y_pos)}, {-1.0, 0.0, 0.0 , static_cast<double>(z_pos)}, {0.0, 0.0, 0.0, 1.0}};
 			
 			//ur_kinematics::forward(&jointAngles_[0], &endPoseMatrix[0][0]);
 			num_sol = ur_kinematics::inverse(&endPoseMatrix[0][0], &q_sols[0][0], 0.0);
 			//ROS_INFO("no of solutions: %i\n",num_sol);
 			ROS_INFO("all solutions: ");
-			best_num = 0;
-/*
+			best_num = -1;
 			for(int i=0;i<num_sol;i++){
-				if(q_sols[i][0]>(-PI/2)&&q_sols[i][0]<(PI/2)){	//base joint must be facing forward
-					if(q_sols[i][1]>0&&q_sols[i][1]<(PI)){	//shoulder joint cannot be below the table/linear actuator
-						if(q_sols[i][3]>(-PI/2)&&q_sols[i][3]<(PI/2)){	//first wrist joint cannot bend backwards		
+				ROS_INFO("Solution %i: ",i);
+				for(int j=0;j<6;j++)
+					ROS_INFO("%f",q_sols[i][j]);
+			}
+
+			//double test_sol[] = {PI,3*(PI/2),0,PI/2,0,0};			
+
+			for(int i = 0;i<num_sol;i++){
+				for(int j =0;j<6;j++){
+					if(q_sols[i][j]>constraints[j][0] && q_sols[i][j]<constraints[j][1])
+						trajectory_scores[i]++;		
+				}	
+			}
+			for(int i =0; i<num_sol;i++){
+				if(trajectory_scores[i]==6){
+					best_num = i;
+				}
+			}
+
+			/*for(int i=0;i<num_sol;i++){
+				if(q_sols[i][SHOULDERPANJOINT]>(PI/2)&&q_sols[i][SHOULDERPANJOINT]<(3*(PI/2))){	//base joint must be facing forward
+					if(q_sols[i][SHOULDERLIFTJOINT]>PI&&q_sols[i][SHOULDERLIFTJOINT]<(2*PI)){	//shoulder joint cannot be below the table/linear actuator
+						if(q_sols[i][WRIST2JOINT]>((PI/2)-0.1) && q_sols[i][WRIST2JOINT]<((PI/2)+0.1)){	//second wrist joint cannot face upwards		
 							best_num = i;
-							for(int j=0;j<6;j++)
-								ROS_INFO("%d, ", q_sols[i][j]);			
-							ROS_INFO("\n");
 							break;
 						}
 					}
 				}			
-			}
-*/
+			}*/
+			
+			//double zero_sol[] = {(PI/2),(PI/2),0,0,0,0};
+
 			ROS_INFO("Selecting part no.:%i\n",partNumber);
 
 			if (best_num > -1){
 				ROS_INFO("Best solution:%i\n", best_num);
-				for (int i = 0; i < 6; i++)
-				{
-					best_sol[i] = q_sols[best_num][i];
-				}
 				joint_trajectory.header.seq = count++;
 				joint_trajectory.header.stamp = ros::Time::now();
 				joint_trajectory.header.frame_id = "/world";
@@ -206,16 +209,50 @@ int main(int argc, char **argv)
 				
 				joint_trajectory_publisher.publish(joint_trajectory);
 				
-				ros::Duration(3.0).sleep();
+				}
+	ros::Duration(2.5).sleep();
+}
+
+int main(int argc, char **argv)
+{
+	ros::init(argc, argv, "ariac_challenge_node");
+	ros::NodeHandle n;
+
+	ros::AsyncSpinner spinner(2);
+	spinner.start();
+
+	order_vector.clear();
+
+	ros::Subscriber orderSub = n.subscribe("ariac/orders", 1000, recieveOrder);
+
+	ros::Subscriber cameraSub = n.subscribe("ariac/logical_camera", 1000, logicalCameraCallback);
+	// Subscribe to the '/ariac/competition_state' topic.
+	ros::Subscriber competitionStateSubscriber = n.subscribe("/ariac/competition_state", 10, &competitionCallback);
+	ros::Publisher joint_trajectory_publisher = n.advertise<trajectory_msgs::JointTrajectory>("/ariac/arm/command", 10);
+	ros::Subscriber joint_states_h = n.subscribe("ariac/joint_states", 10, jointCB);
+	
+	startCompetition(n);
+	
+	while(ros::ok()){
+		ros::spinOnce();
+		if(order_vector.size() > 0){
+			//Retrieve the transformation
 				if(partNumber<numberofparts)
 					partNumber++;
 				else
 					partNumber=0;
+
+				current_pose.pose = camera_models[partNumber].pose;
+
+				//move above the piece
+				move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.1);
+				//move down on the piece
+				move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z);
+				//turn on the vacuum gripper to pick it up
+				//pick up
+				move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.3);
 				
-			}
-			else{
-				ROS_INFO("No solution exists\n");
-			}
+				
 			
 			// Set the desired pose for the arm in the arm controller.
 			//move_group.setPoseTarget(end_pose);
