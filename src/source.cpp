@@ -258,32 +258,37 @@ int main(int argc, char **argv)
 					partNumber=0;
 				}
 
-				current_pose.pose = camera_models[partNumber].pose;
+				if(camera_models[partNumber].type == ObjectType){
 
-				//move above the piece
-				end_pose = get_transform();
-				move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2);
-				//move down on the piece
-				move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.01);
-				//vacuum gripper
-				//update the gripper state from the callback
-				ros::Duration(0.1).sleep();
-				//enable if not already grabbing
-				if(gripper_state.enabled==false && gripper_state.attached==false){
-					gripper_control.request.enable = true;
-					gripper_client.call(gripper_control);
-				}else{
-					ROS_INFO("Gripper currently in use");
+					current_pose.pose = camera_models[partNumber].pose;
+
+					//move above the piece
+					end_pose = get_transform();
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2);
+					//move down on the piece
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.01);
+					//vacuum gripper
+					//update the gripper state from the callback
+					ros::Duration(0.1).sleep();
+					//enable if not already grabbing
+					if(gripper_state.enabled==false && gripper_state.attached==false){
+						gripper_control.request.enable = true;
+						gripper_client.call(gripper_control);
+					}else{
+						ROS_INFO("Gripper currently in use");
+					}
+					ros::Duration(0.1).sleep();
+					//pick up
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2);
+					ros::Duration(1).sleep();
+					//move back down
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.01);
+					//drop
+					ros::Duration(0.5).sleep();
+					gripper_control.request.enable = false;
+						gripper_client.call(gripper_control);
+					
 				}
-				ros::Duration(0.1).sleep();
-				//pick up
-				move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2);
-				//drop
-				ros::Duration(0.5).sleep();
-				gripper_control.request.enable = false;
-					gripper_client.call(gripper_control);
-				ros::Duration(0.5).sleep();
-				
 			
 		}
 	}
