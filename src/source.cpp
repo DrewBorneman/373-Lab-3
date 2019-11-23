@@ -5,6 +5,8 @@
 #include "osrf_gear/Order.h"
 #include "osrf_gear/GetMaterialLocations.h"
 #include "osrf_gear/LogicalCameraImage.h"
+#include "osrf_gear/VacuumGripperState.h"
+#include "osrf_gear/VacuumGripperControl.h"
 #include "osrf_gear/Model.h"
 #include "std_msgs/String.h"
 #include "trajectory_msgs/JointTrajectory.h"
@@ -28,17 +30,15 @@
 
 #define PI 3.14159265
 
-
 std::vector<osrf_gear::Order> order_vector;
 std::string ObjectType = "piston_rod_part";
 std::string CompetitionState;
 sensor_msgs::JointState joint_states;
+osrf_gear::VacuumGripperState gripper_state;
 osrf_gear::Model camera_models[32];
 int numberofparts = 12;
 int partNumber = 0;
-
-	//create variables
-	geometry_msgs::PoseStamped current_pose, end_pose;
+geometry_msgs::PoseStamped current_pose;
 
 void recieveOrder(const osrf_gear::Order::ConstPtr & order)
 {
@@ -49,6 +49,10 @@ void recieveOrder(const osrf_gear::Order::ConstPtr & order)
 
 void jointCB(const sensor_msgs::JointState::ConstPtr & jointStateMsg){
 	joint_states = *jointStateMsg;
+}
+
+void gripperCB(const osrf_gear::VacuumGripperState::ConstPtr & gripperStateMsg){
+	gripper_state = *gripperStateMsg;
 }
 
 void logicalCameraCallback(const osrf_gear::LogicalCameraImage::ConstPtr & imageMsg)
@@ -96,53 +100,32 @@ void startCompetition(ros::NodeHandle & n)
 
 void move_arm(ros::Publisher joint_trajectory_publisher,double x_pos,double y_pos,double z_pos)
 {
-	tf2_ros::Buffer tfBuffer;
-	//moveit::planning_interface::MoveGroupInterface move_group("manipulator");
-	tf2_ros::TransformListener tfListener(tfBuffer);
-	geometry_msgs::TransformStamped tfStamped;
-	//moveit::planning_interface::MoveItErrorCode planningError;
 	double q[] = {3.14, -1.13, 1.51, 3.77, -1.51, 0};	//initial values for the joint angles
 	double T[4][4];		//current pose
 	double q_sols[8][6];
 	double constraints[6][2] = {{(PI/2),(3*(PI/2))},{PI,(2*PI)},{0,(2*PI)},{0,(2*PI)},{((PI/2)-0.1),((PI/2)+0.1)},{0,(2*PI)}};
-	std::string errStr;
 	int num_sol;
 	int best_num;
 	int count = 0;
 	int trajectory_scores[8] = {0,0,0,0,0,0,0,0};
 	trajectory_msgs::JointTrajectory joint_trajectory;
+	
+			ROS_INFO("Moving to x: %f,y:%f,z:%f",x_pos,y_pos,z_pos);
 
-			try {
-				tfBuffer.canTransform("world","logical_camera_frame", ros::Time(), ros::Duration(5.0), &errStr);
-				tfStamped = tfBuffer.lookupTransform("base_link", "logical_camera_frame", ros::Time(0.0), ros::Duration(1.0));
-				ROS_DEBUG("Transform to [%s] from [%s]", tfStamped.header.frame_id.c_str(), 		tfStamped.child_frame_id.c_str());
-				}
-			catch (tf2::TransformException &ex) {
-				ROS_ERROR("%s", ex.what());
-			}
-			//end_pose = current_pose;
 
-			tf2::doTransform(current_pose, end_pose, tfStamped);
-
-			end_pose.pose.orientation.w = 0.707;
-			end_pose.pose.orientation.x = 0.0;
-			end_pose.pose.orientation.y = 0.707;
-			end_pose.pose.orientation.z = 0.0;
-
-			//ROS_INFO("Part Pose: X:%f, Y:%f, Z:%f\n", end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z);
-
-			double endPoseMatrix[4][4] = {{0.0, -1.0, 0.0, static_cast<double>(x_pos)}, {0.0, 0.0, 1.0, static_cast<double>(y_pos)}, {-1.0, 0.0, 0.0 , static_cast<double>(z_pos)}, {0.0, 0.0, 0.0, 1.0}};
+			double endPoseMatrix[4][4] = {{0.0, -1.0, 0.0, x_pos}, {0.0, 0.0, 1.0, y_pos}, {-1.0, 0.0, 0.0 , z_pos}, {0.0, 0.0, 0.0, 1.0}};
 			
 			//ur_kinematics::forward(&jointAngles_[0], &endPoseMatrix[0][0]);
 			num_sol = ur_kinematics::inverse(&endPoseMatrix[0][0], &q_sols[0][0], 0.0);
 			//ROS_INFO("no of solutions: %i\n",num_sol);
-			ROS_INFO("all solutions: ");
+			//ROS_INFO("all solutions: ");
 			best_num = -1;
+			/*
 			for(int i=0;i<num_sol;i++){
 				ROS_INFO("Solution %i: ",i);
 				for(int j=0;j<6;j++)
 					ROS_INFO("%f",q_sols[i][j]);
-			}
+			}*/
 
 			//double test_sol[] = {PI,3*(PI/2),0,PI/2,0,0};			
 
@@ -213,6 +196,34 @@ void move_arm(ros::Publisher joint_trajectory_publisher,double x_pos,double y_po
 	ros::Duration(2.5).sleep();
 }
 
+geometry_msgs::PoseStamped get_transform(){
+
+	geometry_msgs::PoseStamped end_pose;
+	tf2_ros::Buffer tfBuffer;
+	tf2_ros::TransformListener tfListener(tfBuffer);
+	geometry_msgs::TransformStamped tfStamped;
+	std::string errStr;
+	
+		try {
+			tfBuffer.canTransform("world","logical_camera_frame", ros::Time(), ros::Duration(2.0), &errStr);
+			tfStamped = tfBuffer.lookupTransform("base_link", "logical_camera_frame", ros::Time(0.0), ros::Duration(2.0));
+			ROS_DEBUG("Transform to [%s] from [%s]", tfStamped.header.frame_id.c_str(), 		tfStamped.child_frame_id.c_str());
+			}
+		catch (tf2::TransformException &ex) {
+			ROS_ERROR("%s", ex.what());
+		}	
+				
+		tf2::doTransform(current_pose, end_pose, tfStamped);
+		
+		end_pose.pose.orientation.w = 0.707;
+		end_pose.pose.orientation.x = 0.0;
+		end_pose.pose.orientation.y = 0.707;
+		end_pose.pose.orientation.z = 0.0;
+		
+		return end_pose;
+
+}
+
 int main(int argc, char **argv)
 {
 	ros::init(argc, argv, "ariac_challenge_node");
@@ -229,41 +240,50 @@ int main(int argc, char **argv)
 	// Subscribe to the '/ariac/competition_state' topic.
 	ros::Subscriber competitionStateSubscriber = n.subscribe("/ariac/competition_state", 10, &competitionCallback);
 	ros::Publisher joint_trajectory_publisher = n.advertise<trajectory_msgs::JointTrajectory>("/ariac/arm/command", 10);
+	//ros::Publisher gripper_publisher = n.advertise<osrf_gear::VacuumGripperControl>("/ariac/gripper/control", 10);
+	ros::ServiceClient gripper_client = n.serviceClient<osrf_gear::VacuumGripperControl>("/ariac/gripper/control");
+	ros::Subscriber gripper_subscriber = n.subscribe("ariac/gripper/state", 10, gripperCB);
 	ros::Subscriber joint_states_h = n.subscribe("ariac/joint_states", 10, jointCB);
-	
+	geometry_msgs::PoseStamped end_pose;
+	osrf_gear::VacuumGripperControl gripper_control;
 	startCompetition(n);
-	
+
 	while(ros::ok()){
 		ros::spinOnce();
 		if(order_vector.size() > 0){
 			//Retrieve the transformation
-				if(partNumber<numberofparts)
+				if(partNumber<numberofparts){
 					partNumber++;
-				else
+				}else{
 					partNumber=0;
+				}
 
 				current_pose.pose = camera_models[partNumber].pose;
 
 				//move above the piece
-				move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.1);
+				end_pose = get_transform();
+				move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2);
 				//move down on the piece
-				move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z);
-				//turn on the vacuum gripper to pick it up
+				move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.01);
+				//vacuum gripper
+				//update the gripper state from the callback
+				ros::Duration(0.1).sleep();
+				//enable if not already grabbing
+				if(gripper_state.enabled==false && gripper_state.attached==false){
+					gripper_control.request.enable = true;
+					gripper_client.call(gripper_control);
+				}else{
+					ROS_INFO("Gripper currently in use");
+				}
+				ros::Duration(0.1).sleep();
 				//pick up
-				move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.3);
+				move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2);
+				//drop
+				ros::Duration(0.5).sleep();
+				gripper_control.request.enable = false;
+					gripper_client.call(gripper_control);
+				ros::Duration(0.5).sleep();
 				
-				
-			
-			// Set the desired pose for the arm in the arm controller.
-			//move_group.setPoseTarget(end_pose);
-			// Instantiate and create a plan.
-			//moveit::planning_interface::MoveGroupInterface::Plan movePlan;
-			// Create a plan based on the settings (all default settings now) in movePlan.
-			//planningError = move_group.plan(movePlan);
-			// Planning does not always succeed. Check the output.
-			// In the event that the plan was created, execute it.
-			//if(planningError == moveit_msgs::MoveItErrorCodes::SUCCESS)
-			//	move_group.execute(movePlan);
 			
 		}
 	}
