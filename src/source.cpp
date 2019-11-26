@@ -98,12 +98,12 @@ void startCompetition(ros::NodeHandle & n)
 
 }
 
-void move_arm(ros::Publisher joint_trajectory_publisher,double x_pos,double y_pos,double z_pos)
+void move_arm(ros::Publisher joint_trajectory_publisher,double x_pos,double y_pos,double z_pos, bool to_agv)
 {
 	double q[] = {3.14, -1.13, 1.51, 3.77, -1.51, 0};	//initial values for the joint angles
 	double T[4][4];		//current pose
 	double q_sols[8][6];
-	double constraints[6][2] = {{(PI/2),(3*(PI/2))},{PI,(2*PI)},{0,(2*PI)},{0,(2*PI)},{((PI/2)-0.1),((PI/2)+0.1)},{0,(2*PI)}};
+	double constraints[6][2] = {{(PI/2),(3*(PI/2))},{PI,(2*PI)},{0,(2*PI)},{0,(PI)},{((PI/2)-0.1),((PI/2)+0.1)},{0,(2*PI)}};
 	int num_sol;
 	int best_num;
 	int count = 0;
@@ -184,11 +184,15 @@ void move_arm(ros::Publisher joint_trajectory_publisher,double x_pos,double y_po
 				joint_trajectory.points[0].time_from_start = ros::Duration(0.0);
 				
 				joint_trajectory.points[1].positions.resize(joint_trajectory.joint_names.size());
-				joint_trajectory.points[1].positions[0] = joint_states.position[1];
+				if(to_agv){
+					joint_trajectory.points[1].positions[0] = 4.2;
+				}else{
+					joint_trajectory.points[1].positions[0] = 2.1;
+				}
 				for (int indy = 0; indy < 6; indy++) {
 					joint_trajectory.points[1].positions[indy + 1] = q_sols[best_num][indy];
 				}
-				joint_trajectory.points[1].time_from_start = ros::Duration(2.0);		
+				joint_trajectory.points[1].time_from_start = ros::Duration(1.0);		
 				
 				joint_trajectory_publisher.publish(joint_trajectory);
 				
@@ -206,7 +210,7 @@ geometry_msgs::PoseStamped get_transform(){
 	
 		try {
 			tfBuffer.canTransform("world","logical_camera_frame", ros::Time(), ros::Duration(2.0), &errStr);
-			tfStamped = tfBuffer.lookupTransform("base_link", "logical_camera_frame", ros::Time(0.0), ros::Duration(2.0));
+			tfStamped = tfBuffer.lookupTransform("base_link", "logical_camera_frame", ros::Time(0.0), ros::Duration(1.0));
 			ROS_DEBUG("Transform to [%s] from [%s]", tfStamped.header.frame_id.c_str(), 		tfStamped.child_frame_id.c_str());
 			}
 		catch (tf2::TransformException &ex) {
@@ -231,7 +235,7 @@ int main(int argc, char **argv)
 
 	ros::AsyncSpinner spinner(2);
 	spinner.start();
-
+	int i = 0;
 	order_vector.clear();
 
 	ros::Subscriber orderSub = n.subscribe("ariac/orders", 1000, recieveOrder);
@@ -264,9 +268,10 @@ int main(int argc, char **argv)
 
 					//move above the piece
 					end_pose = get_transform();
-					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2);
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2,false);
 					//move down on the piece
-					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.01);
+					end_pose = get_transform();
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.02,false);
 					//vacuum gripper
 					//update the gripper state from the callback
 					ros::Duration(0.1).sleep();
@@ -274,19 +279,31 @@ int main(int argc, char **argv)
 					if(gripper_state.enabled==false && gripper_state.attached==false){
 						gripper_control.request.enable = true;
 						gripper_client.call(gripper_control);
+						i = 0;
+						while(gripper_state.attached==false && i <= 5){
+							ros::Duration(0.1).sleep();
+							i++;
+							if(i==5)
+								ROS_ERROR("Couldn't pick up the part");	
+						}	
 					}else{
 						ROS_INFO("Gripper currently in use");
 					}
 					ros::Duration(0.1).sleep();
 					//pick up
-					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2);
+					end_pose = get_transform();
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2,false);
 					ros::Duration(1).sleep();
 					//move back down
-					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.01);
+					end_pose = get_transform();
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.02,false);
 					//drop
 					ros::Duration(0.5).sleep();
 					gripper_control.request.enable = false;
 						gripper_client.call(gripper_control);
+					//move above the piece
+					end_pose = get_transform();
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2,false);
 					
 				}
 			
