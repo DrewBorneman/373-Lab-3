@@ -98,7 +98,7 @@ void startCompetition(ros::NodeHandle & n)
 
 }
 
-void move_arm(ros::Publisher joint_trajectory_publisher,double x_pos,double y_pos,double z_pos, bool to_agv)
+void move_arm(ros::Publisher joint_trajectory_publisher,double x_pos,double y_pos,double z_pos)
 {
 	double q[] = {3.14, -1.13, 1.51, 3.77, -1.51, 0};	//initial values for the joint angles
 	double T[4][4];		//current pose
@@ -182,13 +182,9 @@ void move_arm(ros::Publisher joint_trajectory_publisher,double x_pos,double y_po
 				}
 				
 				joint_trajectory.points[0].time_from_start = ros::Duration(0.0);
-				
+
 				joint_trajectory.points[1].positions.resize(joint_trajectory.joint_names.size());
-				if(to_agv){
-					joint_trajectory.points[1].positions[0] = 4.2;
-				}else{
-					joint_trajectory.points[1].positions[0] = 2.1;
-				}
+
 				for (int indy = 0; indy < 6; indy++) {
 					joint_trajectory.points[1].positions[indy + 1] = q_sols[best_num][indy];
 				}
@@ -197,6 +193,58 @@ void move_arm(ros::Publisher joint_trajectory_publisher,double x_pos,double y_po
 				joint_trajectory_publisher.publish(joint_trajectory);
 				
 				}
+	ros::Duration(2.5).sleep();
+}
+
+void move_actuator(ros::Publisher joint_trajectory_publisher, bool to_agv)
+{
+	trajectory_msgs::JointTrajectory joint_trajectory;
+	int count = 0;
+
+				joint_trajectory.header.seq = count++;
+				joint_trajectory.header.stamp = ros::Time::now();
+				joint_trajectory.header.frame_id = "/world";
+				joint_trajectory.joint_names.clear();
+				joint_trajectory.joint_names.push_back("linear_arm_actuator_joint");
+				joint_trajectory.joint_names.push_back("shoulder_pan_joint");
+				joint_trajectory.joint_names.push_back("shoulder_lift_joint");
+				joint_trajectory.joint_names.push_back("elbow_joint");
+				joint_trajectory.joint_names.push_back("wrist_1_joint");
+				joint_trajectory.joint_names.push_back("wrist_2_joint");
+				joint_trajectory.joint_names.push_back("wrist_3_joint");
+
+				joint_trajectory.points.resize(2);
+				joint_trajectory.points[0].positions.resize(joint_trajectory.joint_names.size());
+				for (int indy = 0; indy < joint_trajectory.joint_names.size(); indy++) {
+					for (int indz = 0; indz < joint_states.name.size(); indz++) {
+						if (joint_trajectory.joint_names[indy] == joint_states.name[indz]) {
+							joint_trajectory.points[0].positions[indy] = joint_states.position[indz];
+							break;
+						}
+					}
+				}
+				
+				joint_trajectory.points[1].positions.resize(joint_trajectory.joint_names.size());
+
+				joint_trajectory.points[0].time_from_start = ros::Duration(0.0);
+				joint_trajectory.points[1].positions = joint_trajectory.points[0].positions;
+
+				if(to_agv){
+					ROS_INFO("Going to AGV");
+					joint_trajectory.points[0].positions[0] = 2.1;
+					joint_trajectory.points[1].positions[0] = 4.2;
+				}else{
+					ROS_INFO("Going to home position");
+					joint_trajectory.points[0].positions[0] = 4.2;
+					joint_trajectory.points[1].positions[0] = 2.1;
+				}
+				
+				joint_trajectory.points[1].time_from_start = ros::Duration(2.0);		
+				
+				joint_trajectory_publisher.publish(joint_trajectory);
+				
+		
+
 	ros::Duration(2.5).sleep();
 }
 
@@ -251,7 +299,8 @@ int main(int argc, char **argv)
 	geometry_msgs::PoseStamped end_pose;
 	osrf_gear::VacuumGripperControl gripper_control;
 	startCompetition(n);
-
+	while(joint_states.name.size()<1 && ros::ok())
+		ros::spinOnce();
 	while(ros::ok()){
 		ros::spinOnce();
 		if(order_vector.size() > 0){
@@ -268,10 +317,10 @@ int main(int argc, char **argv)
 
 					//move above the piece
 					end_pose = get_transform();
-					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2,false);
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2);
 					//move down on the piece
 					end_pose = get_transform();
-					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.02,false);
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.02);
 					//vacuum gripper
 					//update the gripper state from the callback
 					ros::Duration(0.1).sleep();
@@ -292,18 +341,24 @@ int main(int argc, char **argv)
 					ros::Duration(0.1).sleep();
 					//pick up
 					end_pose = get_transform();
-					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2,false);
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2);
+					ros::Duration(1).sleep();
+					//take to AGV
+					move_actuator(joint_trajectory_publisher, true);
+					ros::Duration(1).sleep();
+					//bring back
+					move_actuator(joint_trajectory_publisher, false);
 					ros::Duration(1).sleep();
 					//move back down
 					end_pose = get_transform();
-					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.02,false);
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.02);
 					//drop
 					ros::Duration(0.5).sleep();
 					gripper_control.request.enable = false;
 						gripper_client.call(gripper_control);
 					//move above the piece
 					end_pose = get_transform();
-					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2,false);
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2);
 					
 				}
 			
