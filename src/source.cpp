@@ -36,8 +36,10 @@ std::string CompetitionState;
 sensor_msgs::JointState joint_states;
 osrf_gear::VacuumGripperState gripper_state;
 osrf_gear::Model camera_models[32];
+osrf_gear::Model agv_models[32];
 int numberofparts = 12;
 int partNumber = 0;
+float home_position[7] = {0, 3.17,-1.88,2.54,-2.46,-1.57,5.71};
 geometry_msgs::PoseStamped current_pose;
 
 void recieveOrder(const osrf_gear::Order::ConstPtr & order)
@@ -63,6 +65,12 @@ void logicalCameraCallback(const osrf_gear::LogicalCameraImage::ConstPtr & image
 			camera_models[i] = imageMsg->models[i];
 		//camera_models = imageMsg->models;
 		//ROS_INFO("Part Pose: X:%f, Y:%f, Z:%f\n", current_pose.pose.position.x,current_pose.pose.position.y,current_pose.pose.position.z);
+}
+
+void agvCameraCallback(const osrf_gear::LogicalCameraImage::ConstPtr & imageMsg)
+{ 
+		for(int i = 0; i<imageMsg->models.size();i++)
+			agv_models[i] = imageMsg->models[i];
 }
 
   /// Called when a new message is received.
@@ -98,7 +106,7 @@ void startCompetition(ros::NodeHandle & n)
 
 }
 
-void move_arm(ros::Publisher joint_trajectory_publisher,double x_pos,double y_pos,double z_pos)
+void move_arm(ros::Publisher joint_trajectory_publisher,double x_pos,double y_pos,double z_pos, bool to_agv)
 {
 	double q[] = {3.14, -1.13, 1.51, 3.77, -1.51, 0};	//initial values for the joint angles
 	double T[4][4];		//current pose
@@ -190,13 +198,18 @@ void move_arm(ros::Publisher joint_trajectory_publisher,double x_pos,double y_po
 				}
 				joint_trajectory.points[1].time_from_start = ros::Duration(1.0);		
 				
+				//if(to_agv)
+				//	joint_trajectory.points[1].positions[0] = 4.2;
+				//else
+				//	joint_trajectory.points[1].positions[0] = 2.1;
+
 				joint_trajectory_publisher.publish(joint_trajectory);
 				
 				}
 	ros::Duration(2.5).sleep();
 }
 
-void move_actuator(ros::Publisher joint_trajectory_publisher, bool to_agv)
+void move_home(ros::Publisher joint_trajectory_publisher, bool to_agv)
 {
 	trajectory_msgs::JointTrajectory joint_trajectory;
 	int count = 0;
@@ -227,16 +240,15 @@ void move_actuator(ros::Publisher joint_trajectory_publisher, bool to_agv)
 				joint_trajectory.points[1].positions.resize(joint_trajectory.joint_names.size());
 
 				joint_trajectory.points[0].time_from_start = ros::Duration(0.0);
-				joint_trajectory.points[1].positions = joint_trajectory.points[0].positions;
+				for(int i=0;i<=6;i++)
+					joint_trajectory.points[1].positions[i] = home_position[i];
 
 				if(to_agv){
 					ROS_INFO("Going to AGV");
-					joint_trajectory.points[0].positions[0] = 2.1;
-					joint_trajectory.points[1].positions[0] = 4.2;
+					joint_trajectory.points[1].positions[0] = 2.1;
 				}else{
 					ROS_INFO("Going to home position");
-					joint_trajectory.points[0].positions[0] = 4.2;
-					joint_trajectory.points[1].positions[0] = 2.1;
+					joint_trajectory.points[1].positions[0] = 0;
 				}
 				
 				joint_trajectory.points[1].time_from_start = ros::Duration(2.0);		
@@ -248,17 +260,23 @@ void move_actuator(ros::Publisher joint_trajectory_publisher, bool to_agv)
 	ros::Duration(2.5).sleep();
 }
 
-geometry_msgs::PoseStamped get_transform(){
+geometry_msgs::PoseStamped get_transform(bool to_agv){
 
 	geometry_msgs::PoseStamped end_pose;
 	tf2_ros::Buffer tfBuffer;
 	tf2_ros::TransformListener tfListener(tfBuffer);
 	geometry_msgs::TransformStamped tfStamped;
 	std::string errStr;
+	std::string cameraFrame;
+
+	if(to_agv)
+		cameraFrame = "logical_camera_over_agv1_frame";
+	else
+		cameraFrame = "logical_camera_frame";
 	
 		try {
-			tfBuffer.canTransform("world","logical_camera_frame", ros::Time(), ros::Duration(2.0), &errStr);
-			tfStamped = tfBuffer.lookupTransform("base_link", "logical_camera_frame", ros::Time(0.0), ros::Duration(1.0));
+			tfBuffer.canTransform("world",cameraFrame, ros::Time(), ros::Duration(2.0), &errStr);
+			tfStamped = tfBuffer.lookupTransform("base_link", cameraFrame, ros::Time(0.0), ros::Duration(1.0));
 			ROS_DEBUG("Transform to [%s] from [%s]", tfStamped.header.frame_id.c_str(), 		tfStamped.child_frame_id.c_str());
 			}
 		catch (tf2::TransformException &ex) {
@@ -289,6 +307,7 @@ int main(int argc, char **argv)
 	ros::Subscriber orderSub = n.subscribe("ariac/orders", 1000, recieveOrder);
 
 	ros::Subscriber cameraSub = n.subscribe("ariac/logical_camera", 1000, logicalCameraCallback);
+	ros::Subscriber agvCameraSub = n.subscribe("ariac/logical_camera_over_agv1", 1000, agvCameraCallback);
 	// Subscribe to the '/ariac/competition_state' topic.
 	ros::Subscriber competitionStateSubscriber = n.subscribe("/ariac/competition_state", 10, &competitionCallback);
 	ros::Publisher joint_trajectory_publisher = n.advertise<trajectory_msgs::JointTrajectory>("/ariac/arm/command", 10);
@@ -316,11 +335,11 @@ int main(int argc, char **argv)
 					current_pose.pose = camera_models[partNumber].pose;
 
 					//move above the piece
-					end_pose = get_transform();
-					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2);
+					end_pose = get_transform(false);
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2,false);
 					//move down on the piece
-					end_pose = get_transform();
-					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.02);
+					end_pose = get_transform(false);
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.02,false);
 					//vacuum gripper
 					//update the gripper state from the callback
 					ros::Duration(0.1).sleep();
@@ -340,25 +359,27 @@ int main(int argc, char **argv)
 					}
 					ros::Duration(0.1).sleep();
 					//pick up
-					end_pose = get_transform();
-					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2);
+					end_pose = get_transform(false);
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2,false);
 					ros::Duration(1).sleep();
 					//take to AGV
-					move_actuator(joint_trajectory_publisher, true);
+					end_pose = get_transform(false);
+					move_home(joint_trajectory_publisher, true);
 					ros::Duration(1).sleep();
 					//bring back
-					move_actuator(joint_trajectory_publisher, false);
+					end_pose = get_transform(false);
+					move_home(joint_trajectory_publisher, false);
 					ros::Duration(1).sleep();
 					//move back down
-					end_pose = get_transform();
-					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.02);
+					end_pose = get_transform(false);
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.02,false);
 					//drop
 					ros::Duration(0.5).sleep();
 					gripper_control.request.enable = false;
 						gripper_client.call(gripper_control);
 					//move above the piece
-					end_pose = get_transform();
-					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2);
+					end_pose = get_transform(false);
+					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2,false);
 					
 				}
 			
