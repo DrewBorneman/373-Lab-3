@@ -39,7 +39,7 @@ osrf_gear::Model camera_models[32];
 osrf_gear::Model agv_models[32];
 int numberofparts = 12;
 int partNumber = 0;
-float home_position[7] = {0, 3.17,-1.88,2.54,-2.46,-1.57,5.71};
+float home_position[7] = {0, /*3.17*/1.60,/*-1.88*/4.4,2.54,-2.46,-1.57,5.71};
 geometry_msgs::PoseStamped current_pose;
 
 void recieveOrder(const osrf_gear::Order::ConstPtr & order)
@@ -163,7 +163,7 @@ void move_arm(ros::Publisher joint_trajectory_publisher,double x_pos,double y_po
 			//double zero_sol[] = {(PI/2),(PI/2),0,0,0,0};
 
 			ROS_INFO("Selecting part no.:%i\n",partNumber);
-
+			//float home_position[7] = {0, 3.17, 4.4 ,2.54,-2.46,-1.57,5.71};
 			if (best_num > -1){
 				ROS_INFO("Best solution:%i\n", best_num);
 				joint_trajectory.header.seq = count++;
@@ -366,6 +366,10 @@ int main(int argc, char **argv)
 					end_pose = get_transform(false);
 					move_home(joint_trajectory_publisher, true);
 					ros::Duration(1).sleep();
+					//drop
+					ros::Duration(0.5).sleep();
+					gripper_control.request.enable = false;
+						gripper_client.call(gripper_control);
 					//bring back
 					end_pose = get_transform(false);
 					move_home(joint_trajectory_publisher, false);
@@ -373,10 +377,7 @@ int main(int argc, char **argv)
 					//move back down
 					end_pose = get_transform(false);
 					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.02,false);
-					//drop
-					ros::Duration(0.5).sleep();
-					gripper_control.request.enable = false;
-						gripper_client.call(gripper_control);
+					
 					//move above the piece
 					end_pose = get_transform(false);
 					move_arm(joint_trajectory_publisher, end_pose.pose.position.x,end_pose.pose.position.y,end_pose.pose.position.z+0.2,false);
